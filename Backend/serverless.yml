@@ -1,0 +1,315 @@
+# Blog: Change the name of the org 
+org: adnananis
+service: serverless-blog-app
+
+plugins:
+  - serverless-webpack
+  - serverless-iam-roles-per-function
+  - serverless-plugin-tracing
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  profile: serverless
+
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+
+  tracing:
+    lambda: true
+    apiGateway: true
+
+  # Use these variables in the functions and resouorces section below. For example, 
+  # ${self:provider.environment.ATTACHMENT_S3_BUCKET}
+  environment:
+    BLOG_TABLE: blog-posts
+    BLOG_CREATED_AT_INDEX: CreatedAtIndex
+    ATTACHMENT_S3_BUCKET: serverless-blog-images
+    SIGNED_URL_EXPIRATION: 300    
+    AUTH_0_SECRET_ID: Auth0Secret-${self:provider.stage}
+    AUTH_0_SECRET_FIELD: auth0Secret
+
+  logs:
+    # Enable API Gateway logs
+    restApi: true
+
+  iamRoleStatements:       
+    - Effect: Allow
+      Action:
+        - secretsmanager:GetSecretValue
+      Resource: !Ref Auth0Secret
+    - Effect: Allow
+      Action:
+        - kms:Decrypt
+      Resource: !GetAtt KMSKey.Arn
+    
+custom:  
+  documentation:
+    api:
+      info:
+        version: '0.0.1'
+        title: Blog APIs
+        description: Serverless Application
+    models:
+      - name: CreateBlogRequest
+        contentType: 'application/json'
+        schema: ${file(models/create-blog-model.json)}
+      - name: UpdateBLogRequest
+        contentType: 'application/json'
+        schema: ${file(models/update-blog-model.json)}
+
+functions:
+
+  Auth:
+    handler: src/lambda/auth/auth0Authorizer.handler    
+
+  # TODO: Configure this function - 
+  # Provide iamRoleStatements property for performing Actions on DynamoDB
+  GetBlogs:
+    handler: src/lambda/http/getBlogs.handler
+    events:
+      - http:
+          method: get
+          path: blogs
+          cors: true          
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+          - dynamodb:Scan
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BLOG_TABLE}     
+
+  # TODO: Configure this function - 
+  # Provide iamRoleStatements property for performing Actions on DynamoDB
+  GetBlogByUser:
+    handler: src/lambda/http/getBlogByUser.handler
+    events:
+      - http:
+          method: get
+          path: userBlogs
+          cors: true
+          authorizer: Auth          
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query          
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BLOG_TABLE}     
+
+  # TODO: Configure this function - 
+  # Provide iamRoleStatements property for performing Actions on DynamoDB
+  GetBlogById:
+    handler: src/lambda/http/getBlogById.handler
+    events:
+      - http:
+          method: get
+          path: blog/{postId}
+          cors: true          
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:GetItem
+          - dynamodb:Query          
+        Resource: 
+          - "arn:aws:dynamodb:us-east-1:023803829765:table/${self:provider.environment.BLOG_TABLE}"
+          - "arn:aws:dynamodb:us-east-1:023803829765:table/${self:provider.environment.BLOG_TABLE}/index/PostIdIndex"        
+
+  # # TODO: Configure this function - 
+  # Provide iamRoleStatements property. Decide the Actions and AWS Resource. 
+  # To refer to an AWS resource defined in the "Resources" section, you can use "Resource: !GetAtt <resource-name>.Arn"
+  # To validate incoming HTTP requests, we have provided the request schemas in function definition below. 
+  CreateBlog:
+    handler: src/lambda/http/createBlog.handler
+    events:
+      - http:
+          method: post
+          path: blog
+          cors: true
+          authorizer: Auth
+          request:
+            schemas:
+              application/json: ${file(models/create-blog-model.json)}
+          documentation:
+            summary: 'Create New Blog item'
+            description: 'It creates new blog item'
+            requestModels:
+              'application/json': CreateBlogRequest
+          reqValidatorName: onlyBody   
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BLOG_TABLE}            
+
+  # # TODO: Configure this function
+  # # Provide property for setting up CORS, Authorizer, iamRoleStatements, and request schemas
+  UpdateBlog:
+    handler: src/lambda/http/updateBlog.handler
+    events:
+      - http:
+          method: patch
+          path: blog/{postId}
+          cors: true
+          authorizer: Auth
+          request:
+            schemas:
+              application/json: ${file(models/update-blog-model.json)}
+          documentation:
+            summary: 'Update blog item'
+            description: 'It updates blog item'
+            requestModels:
+              'application/json': UpdateBlogRequest
+          reqValidatorName: onlyBody
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BLOG_TABLE}     
+  # TODO: Configure this function
+  # Provide property for setting up CORS, Authorizer, iamRoleStatements
+  DeleteBlog:
+    handler: src/lambda/http/deleteBlog.handler
+    events:
+      - http:
+          method: delete
+          path: blog/{postId}
+          cors: true
+          authorizer: Auth
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:DeleteItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BLOG_TABLE}     
+
+  # # TODO: Configure this function
+  # # Provide property for setting up CORS, Authorizer, iamRoleStatements
+  GenerateUploadUrl:
+    handler: src/lambda/http/generateUploadUrl.handler
+    events:
+      - http:
+          method: post
+          path: blog/{postId}/attachment
+          cors: true
+          authorizer: Auth
+    iamRoleStatements:    
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:GetObject
+      Resource: arn:aws:s3:::${self:provider.environment.ATTACHMENT_S3_BUCKET}/*
+    - Effect: Allow
+      Action:
+        - dynamodb:UpdateItem
+      Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BLOG_TABLE}   
+
+resources:
+  Resources:
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+  
+    RequestBodyValidator:
+      Type: AWS::ApiGateway::RequestValidator
+      Properties:
+        Name: 'request-body-validator'
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ValidateRequestBody: true
+        ValidateRequestParameters: true
+
+    BlogTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: blog-posts
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: postId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: postId
+            KeyType: RANGE        
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: PostIdIndex
+            KeySchema:
+              - AttributeName: postId
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+
+    AttachmentsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.ATTACHMENT_S3_BUCKET}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: false
+          BlockPublicPolicy: false
+          IgnorePublicAcls: false
+          RestrictPublicBuckets: false
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - '*'
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              AllowedHeaders:
+                - '*'
+
+    AttachmentsBucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket: !Ref AttachmentsBucket
+        PolicyDocument:
+          Statement:
+            - Sid: PublicReadGetObject
+              Effect: Allow
+              Principal: '*'
+              Action: s3:GetObject
+              Resource: "arn:aws:s3:::${self:provider.environment.ATTACHMENT_S3_BUCKET}/*"
+    
+    KMSKey:
+      Type: AWS::KMS::Key
+      Properties:
+        Description: KMS key to encrypt Auth0 secret
+        KeyPolicy:
+          Version: '2012-10-17'
+          Id: key-default-1
+          Statement:
+            - Sid: Allow administration of the key
+              Effect: Allow
+              Principal:
+                AWS:
+                  Fn::Join:
+                  - ':'
+                  - - 'arn:aws:iam:'
+                    - Ref: AWS::AccountId
+                    - 'root'
+              Action:
+                - 'kms:*'
+              Resource: '*'
+
+    KMSKeyAlias:
+      Type: AWS::KMS::Alias
+      Properties:
+        AliasName: alias/auth0Key-${self:provider.stage}
+        TargetKeyId: !Ref KMSKey
+
+    Auth0Secret:
+      Type: AWS::SecretsManager::Secret
+      Properties:
+        Name: ${self:provider.environment.AUTH_0_SECRET_ID}
+        Description: Auth0 secret
+        KmsKeyId: !Ref KMSKey

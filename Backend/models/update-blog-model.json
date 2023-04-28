@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "title": "group",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 5
+    },
+    "body": {
+      "type": "string",
+      "minLength": 5
+    },
+    "author": {
+      "type": "string",
+      "minLength": 5
+    },
+    "updatedAt": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "body", 
+    "author"    
+  ],
+  "additionalProperties": false
+}
